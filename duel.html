@@ -1,0 +1,550 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>English Game</title>
+  <style>
+    /* 基础样式 */
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      margin: 0;
+      padding: 0;
+      background: linear-gradient(135deg, #f0f9ff, #cbebff);
+      color: #333;
+    }
+    
+    h1 {
+      text-align: center;
+      margin: 20px 0;
+      color: #005792;
+    }
+    
+    /* 游戏容器样式 */
+    #gameContainer {
+      display: flex;
+      justify-content: center;
+      align-items: flex-start;
+      padding: 20px;
+    }
+    
+    /* canvas 样式 */
+    #gameCanvas {
+      background-color: #fff;
+      box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+      border-radius: 8px;
+      margin-right: 20px;
+    }
+    
+    /* 控制面板样式 */
+    #controls {
+      background-color: #ffffff;
+      border: 1px solid #ddd;
+      padding: 15px;
+      border-radius: 8px;
+      width: 300px;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+    }
+    
+    #controls p {
+      margin: 10px 0;
+      line-height: 1.5;
+    }
+    
+    #placementControls,
+    #gamePlayControls {
+      margin-bottom: 15px;
+    }
+    
+    button {
+      background-color: #005792;
+      color: #fff;
+      border: none;
+      padding: 8px 12px;
+      margin: 5px 2px;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: background-color 0.3s;
+    }
+    
+    button:hover {
+      background-color: #003e66;
+    }
+    
+    button:disabled {
+      background-color: #999;
+      cursor: not-allowed;
+    }
+    
+    select {
+      padding: 6px;
+      border-radius: 4px;
+      border: 1px solid #ccc;
+    }
+    
+    .hidden {
+      display: none;
+    }
+    
+    hr {
+      border: none;
+      border-top: 1px solid #ddd;
+      margin: 15px 0;
+    }
+    
+    #message {
+      font-weight: bold;
+      color: #d9534f;
+      min-height: 24px;
+      margin-top: 10px;
+    }
+  </style>
+</head>
+<body>
+  <h1>English Game</h1>
+  <div id="gameContainer">
+    <canvas id="gameCanvas" width="600" height="600"></canvas>
+    <div id="controls">
+      <div id="phaseInfo">
+        <p>当前阶段：<span id="phaseName">布置阶段</span></p>
+        <p>当前玩家：<span id="currentPlayer">A</span></p>
+        <p id="placementInfo"></p>
+      </div>
+      <div id="placementControls">
+        <p>选择要放置的道具：</p>
+        <button data-type="wall">墙</button>
+        <button data-type="marker">方向标</button>
+        <button data-type="hole">洞</button>
+        <!-- 针对方向标：选择方向 -->
+        <div id="markerDirection" class="hidden">
+          <label>选择方向：</label>
+          <select id="markerDirSelect">
+            <option value="up">上</option>
+            <option value="down">下</option>
+            <option value="left">左</option>
+            <option value="right">右</option>
+          </select>
+        </div>
+        <!-- 放墙时提示：需要点击靠近单元格边框 -->
+        <p id="wallTip" class="hidden">请点击单元格边框（容差10px）放置墙</p>
+      </div>
+      <button id="nextPhaseBtn">完成布置阶段</button>
+      <hr>
+      <div id="gamePlayControls" class="hidden">
+        <p>
+          <button id="rollDiceBtn">掷骰子</button>
+          掷骰子结果：<span id="diceResult">0</span>
+        </p>
+        <p>当前方向：<span id="currentDir">right</span></p>
+        <!-- 改变方向控件：当遇到边界（非墙）时显示 -->
+        <div id="changeDirControls" class="hidden">
+          <p>请选择新方向：</p>
+          <button data-dir="up">上</button>
+          <button data-dir="down">下</button>
+          <button data-dir="left">左</button>
+          <button data-dir="right">右</button>
+        </div>
+      </div>
+      <hr>
+      <div id="message"></div>
+    </div>
+  </div>
+  
+  <script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    const cellSize = canvas.width / 6;
+    const tolerance = 10; // 点击容差10px
+
+    // 游戏状态：阶段 ("placement" 或 "play")
+    let phase = "placement";
+    // 当前玩家: "A" 或 "B"
+    let currentPlayer = "A";
+    // 玩家道具库存：每人 2 个墙、1 个方向标、1 个洞
+    let playerProps = {
+      A: { wall: 2, marker: 1, hole: 1 },
+      B: { wall: 2, marker: 1, hole: 1 }
+    };
+    
+    // 存放所有道具  
+    // 墙：{ type: "wall", row, col, side } —— 表示位于 cell(row,col) 的边，side: "top", "bottom", "left", "right"
+    // 方向标：{ type: "marker", row, col, dir }
+    // 洞：{ type: "hole", row, col }
+    let props = [];
+    
+    // 棋子信息及起始位置（A：左上角，B：右下角），初始方向 A 向右，B 向左
+    let players = {
+      A: { row: 0, col: 0, dir: "right", start: {row:0, col:0} },
+      B: { row: 5, col: 5, dir: "left", start: {row:5, col:5} }
+    };
+    
+    // DOM 节点
+    const phaseNameSpan = document.getElementById('phaseName');
+    const currentPlayerSpan = document.getElementById('currentPlayer');
+    const placementInfoP = document.getElementById('placementInfo');
+    const nextPhaseBtn = document.getElementById('nextPhaseBtn');
+    const rollDiceBtn = document.getElementById('rollDiceBtn');
+    const diceResultSpan = document.getElementById('diceResult');
+    const currentDirSpan = document.getElementById('currentDir');
+    const messageDiv = document.getElementById('message');
+    const markerDirectionDiv = document.getElementById('markerDirection');
+    const markerDirSelect = document.getElementById('markerDirSelect');
+    const wallTip = document.getElementById('wallTip');
+    const changeDirControls = document.getElementById('changeDirControls');
+    
+    // 更新布置阶段信息显示
+    function updatePlacementInfo() {
+      placementInfoP.textContent = `A: 墙 ${playerProps.A.wall}, 方向标 ${playerProps.A.marker}, 洞 ${playerProps.A.hole} | B: 墙 ${playerProps.B.wall}, 方向标 ${playerProps.B.marker}, 洞 ${playerProps.B.hole}`;
+      currentPlayerSpan.textContent = currentPlayer;
+    }
+    
+    // 绘制网格及所有内容
+    function drawBoard() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      // 绘制6*6网格
+      for(let i = 0; i <= 6; i++){
+        ctx.beginPath();
+        ctx.moveTo(i * cellSize, 0);
+        ctx.lineTo(i * cellSize, canvas.height);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(0, i * cellSize);
+        ctx.lineTo(canvas.width, i * cellSize);
+        ctx.stroke();
+      }
+      
+      // 绘制墙：在指定单元格边上画线（使用较粗线条）
+      props.filter(item => item.type === "wall").forEach(wall => {
+        ctx.strokeStyle = "red";
+        ctx.lineWidth = 4;
+        let x = wall.col * cellSize;
+        let y = wall.row * cellSize;
+        ctx.beginPath();
+        if(wall.side === "left") {
+          ctx.moveTo(x, y);
+          ctx.lineTo(x, y + cellSize);
+        } else if(wall.side === "right") {
+          ctx.moveTo(x + cellSize, y);
+          ctx.lineTo(x + cellSize, y + cellSize);
+        } else if(wall.side === "top") {
+          ctx.moveTo(x, y);
+          ctx.lineTo(x + cellSize, y);
+        } else if(wall.side === "bottom") {
+          ctx.moveTo(x, y + cellSize);
+          ctx.lineTo(x + cellSize, y + cellSize);
+        }
+        ctx.stroke();
+        ctx.lineWidth = 1;
+      });
+      
+      // 绘制方向标和洞：在对应格子内绘制
+      props.filter(item => item.type === "marker" || item.type === "hole").forEach(item => {
+        const x = item.col * cellSize;
+        const y = item.row * cellSize;
+        if(item.type === "marker") {
+          ctx.fillStyle = "blue";
+          ctx.fillRect(x+10, y+10, cellSize-20, cellSize-20);
+          ctx.fillStyle = "white";
+          ctx.font = "20px Arial";
+          ctx.fillText(item.dir.charAt(0).toUpperCase(), x+cellSize/2 - 6, y+cellSize/2 + 6);
+        } else if(item.type === "hole") {
+          ctx.fillStyle = "black";
+          ctx.beginPath();
+          ctx.arc(x+cellSize/2, y+cellSize/2, cellSize/3, 0, Math.PI*2);
+          ctx.fill();
+        }
+      });
+      
+      // 绘制棋子
+      for(let p in players) {
+        const pos = players[p];
+        const cx = pos.col * cellSize + cellSize/2;
+        const cy = pos.row * cellSize + cellSize/2;
+        ctx.beginPath();
+        ctx.arc(cx, cy, cellSize/4, 0, Math.PI*2);
+        ctx.fillStyle = (p === "A" ? "green" : "orange");
+        ctx.fill();
+        ctx.fillStyle = "white";
+        ctx.font = "20px Arial";
+        ctx.fillText(p, cx-6, cy+6);
+      }
+    }
+    
+    updatePlacementInfo();
+    drawBoard();
+    
+    // 当前选中的道具类型（放置阶段）
+    let selectedPropType = null;
+    
+    // 点击布置控件按钮选择道具
+    document.querySelectorAll('#placementControls button[data-type]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        selectedPropType = btn.getAttribute('data-type');
+        messageDiv.textContent = `已选择道具：${selectedPropType}`;
+        // 针对方向标，显示方向选择控件
+        if(selectedPropType === "marker") {
+          markerDirectionDiv.classList.remove('hidden');
+          wallTip.classList.add('hidden');
+        } else if(selectedPropType === "wall") {
+          // 放墙时提示用户点击单元格边框
+          markerDirectionDiv.classList.add('hidden');
+          wallTip.classList.remove('hidden');
+        } else {
+          markerDirectionDiv.classList.add('hidden');
+          wallTip.classList.add('hidden');
+        }
+      });
+    });
+    
+    // 布置阶段：点击画布放置道具
+    canvas.addEventListener('click', (e) => {
+      if(phase !== "placement" || !selectedPropType) return;
+      const rect = canvas.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+      
+      if(selectedPropType === "wall") {
+        // 先确定点击所在的格子
+        let col = Math.floor(x / cellSize);
+        let row = Math.floor(y / cellSize);
+        let offsetX = x - col * cellSize;
+        let offsetY = y - row * cellSize;
+        // 计算四个边距离
+        let distLeft = offsetX;
+        let distRight = cellSize - offsetX;
+        let distTop = offsetY;
+        let distBottom = cellSize - offsetY;
+        // 找出最小距离和对应的边
+        let minDist = Math.min(distLeft, distRight, distTop, distBottom);
+        let chosenSide = null;
+        if(minDist > tolerance) {
+          messageDiv.textContent = "请点击靠近单元格边框的位置放置墙";
+          return;
+        }
+        if(minDist === distLeft) chosenSide = "left";
+        else if(minDist === distRight) chosenSide = "right";
+        else if(minDist === distTop) chosenSide = "top";
+        else if(minDist === distBottom) chosenSide = "bottom";
+        
+        if(playerProps[currentPlayer].wall <= 0) {
+          messageDiv.textContent = `${currentPlayer} 没有剩余的墙`;
+          return;
+        }
+        // 添加墙对象：记录该墙放在 cell(row,col) 的 chosenSide 上
+        props.push({ type: "wall", row, col, side: chosenSide });
+        playerProps[currentPlayer].wall--;
+      } else if(selectedPropType === "marker") {
+        // 放置方向标在格子内：获取用户选择的方向
+        const chosenDir = markerDirSelect.value;
+        if(playerProps[currentPlayer].marker <= 0) {
+          messageDiv.textContent = `${currentPlayer} 没有剩余的方向标`;
+          return;
+        }
+        let col = Math.floor(x / cellSize);
+        let row = Math.floor(y / cellSize);
+        props.push({ type: "marker", row, col, dir: chosenDir });
+        playerProps[currentPlayer].marker--;
+      } else if(selectedPropType === "hole") {
+        // 放置洞，直接放在格子内
+        let col = Math.floor(x / cellSize);
+        let row = Math.floor(y / cellSize);
+        if(playerProps[currentPlayer].hole <= 0) {
+          messageDiv.textContent = `${currentPlayer} 没有剩余的洞`;
+          return;
+        }
+        props.push({ type: "hole", row, col });
+        playerProps[currentPlayer].hole--;
+      }
+      // 重置选中状态
+      selectedPropType = null;
+      markerDirectionDiv.classList.add('hidden');
+      wallTip.classList.add('hidden');
+      // 切换玩家
+      currentPlayer = (currentPlayer === "A") ? "B" : "A";
+      updatePlacementInfo();
+      drawBoard();
+    });
+    
+    // 完成布置阶段，进入游戏阶段
+    nextPhaseBtn.addEventListener('click', () => {
+      if(phase === "placement") {
+        phase = "play";
+        document.getElementById('phaseName').textContent = "游戏阶段";
+        document.getElementById('placementControls').classList.add('hidden');
+        document.getElementById('gamePlayControls').classList.remove('hidden');
+        messageDiv.textContent = "游戏开始！";
+        drawBoard();
+      }
+    });
+    
+    // 固定备用题目
+    function getFixedQuestion() {
+      const questions = [
+        { question: "What is the English word for '苹果'?", correct_answer: "apple" },
+        { question: "What is the English word for '书'?", correct_answer: "book" },
+        { question: "What is the English word for '猫'?", correct_answer: "cat" }
+      ];
+      return questions[Math.floor(Math.random()*questions.length)];
+    }
+    
+    // 判断当前移动是否被墙阻挡（针对单步移动）
+    function isBlocked(fromRow, fromCol, toRow, toCol) {
+      // 如果水平移动：左右移动
+      if(fromRow === toRow && Math.abs(fromCol - toCol) === 1) {
+        if(fromCol < toCol) {
+          // 向右移动，检查当前格右侧 或 目标格左侧是否有墙
+          if(props.some(wall => wall.type === "wall" && wall.row === fromRow && wall.col === fromCol && wall.side === "right")) return true;
+          if(props.some(wall => wall.type === "wall" && wall.row === toRow && wall.col === toCol && wall.side === "left")) return true;
+        } else {
+          // 向左移动
+          if(props.some(wall => wall.type === "wall" && wall.row === fromRow && wall.col === fromCol && wall.side === "left")) return true;
+          if(props.some(wall => wall.type === "wall" && wall.row === toRow && wall.col === toCol && wall.side === "right")) return true;
+        }
+      }
+      // 垂直移动：上下移动
+      if(fromCol === toCol && Math.abs(fromRow - toRow) === 1) {
+        if(fromRow < toRow) {
+          // 向下移动，检查当前格下侧 或 目标格上侧是否有墙
+          if(props.some(wall => wall.type === "wall" && wall.row === fromRow && wall.col === fromCol && wall.side === "bottom")) return true;
+          if(props.some(wall => wall.type === "wall" && wall.row === toRow && wall.col === toCol && wall.side === "top")) return true;
+        } else {
+          // 向上移动
+          if(props.some(wall => wall.type === "wall" && wall.row === fromRow && wall.col === fromCol && wall.side === "top")) return true;
+          if(props.some(wall => wall.type === "wall" && wall.row === toRow && wall.col === toCol && wall.side === "bottom")) return true;
+        }
+      }
+      return false;
+    }
+    
+    // 移动函数：按照当前方向逐步移动步数
+    // 如果因遇到墙中断行动，先判断当前位置是否为胜利位置；否则结束本轮回合
+    function moveCurrentPlayer(steps) {
+      let player = players[currentPlayer];
+      let moved = 0;
+      while(moved < steps) {
+        let nextRow = player.row;
+        let nextCol = player.col;
+        switch(player.dir) {
+          case "up": nextRow--; break;
+          case "down": nextRow++; break;
+          case "left": nextCol--; break;
+          case "right": nextCol++; break;
+        }
+        // 检查边界：遇到边界时允许玩家改变方向
+        if(nextRow < 0 || nextRow >= 6 || nextCol < 0 || nextCol >= 6) {
+          messageDiv.textContent = "遇到边界，请选择新方向";
+          changeDirControls.classList.remove('hidden');
+          return;
+        }
+        // 检查是否有墙阻挡
+        if(isBlocked(player.row, player.col, nextRow, nextCol)) {
+          // 判断当前位置是否为胜利位置
+          if((currentPlayer === "A" && player.row === players.B.start.row && player.col === players.B.start.col) ||
+             (currentPlayer === "B" && player.row === players.A.start.row && player.col === players.A.start.col)) {
+            alert(`Player ${currentPlayer} wins!`);
+            resetGame();
+            return;
+          }
+          messageDiv.textContent = "遇到墙，回合结束";
+          // 直接结束本轮，不进行问答
+          currentPlayer = (currentPlayer === "A") ? "B" : "A";
+          currentPlayerSpan.textContent = currentPlayer;
+          drawBoard();
+          return;
+        }
+        // 检查方向标效果：如果下一格有方向标，调整方向后继续移动
+        let marker = props.find(item => item.type === "marker" && item.row === nextRow && item.col === nextCol);
+        if(marker) {
+          player.dir = marker.dir;
+          currentDirSpan.textContent = marker.dir;
+          messageDiv.textContent = `经过方向标，方向调整为 ${marker.dir}`;
+        }
+        // 执行移动
+        player.row = nextRow;
+        player.col = nextCol;
+        moved++;
+        drawBoard();
+      }
+      
+      // 移动结束后，判断是否达到胜利位置
+      if((currentPlayer === "A" && player.row === players.B.start.row && player.col === players.B.start.col) ||
+         (currentPlayer === "B" && player.row === players.A.start.row && player.col === players.A.start.col)) {
+        alert(`Player ${currentPlayer} wins!`);
+        resetGame();
+        return;
+      }
+      
+      // 检查是否落入洞中
+      let hole = props.find(item => item.type === "hole" && item.row === player.row && item.col === player.col);
+      if(hole) {
+        messageDiv.textContent = `玩家 ${currentPlayer} 掉进洞里，返回起始位置`;
+        player.row = player.start.row;
+        player.col = player.start.col;
+        drawBoard();
+      }
+      
+      // 使用固定题目进行问答
+      const qa = getFixedQuestion();
+      let answer = prompt(qa.question);
+      console.log("Player answered:", answer);
+      
+      // 再次判断是否达到胜利位置
+      if((currentPlayer === "A" && player.row === players.B.start.row && player.col === players.B.start.col) ||
+         (currentPlayer === "B" && player.row === players.A.start.row && player.col === players.A.start.col)) {
+        alert(`Player ${currentPlayer} wins!`);
+        resetGame();
+        return;
+      }
+      
+      // 回合结束后切换玩家
+      currentPlayer = (currentPlayer === "A") ? "B" : "A";
+      currentPlayerSpan.textContent = currentPlayer;
+      drawBoard();
+    }
+    
+    // 重置游戏，返回布置阶段
+    function resetGame() {
+      phase = "placement";
+      currentPlayer = "A";
+      playerProps = {
+        A: { wall: 2, marker: 1, hole: 1 },
+        B: { wall: 2, marker: 1, hole: 1 }
+      };
+      props = [];
+      players.A = { row: 0, col: 0, dir: "right", start: {row:0, col:0} };
+      players.B = { row: 5, col: 5, dir: "left", start: {row:5, col:5} };
+      document.getElementById('phaseName').textContent = "布置阶段";
+      document.getElementById('placementControls').classList.remove('hidden');
+      document.getElementById('gamePlayControls').classList.add('hidden');
+      changeDirControls.classList.add('hidden');
+      updatePlacementInfo();
+      drawBoard();
+      messageDiv.textContent = "游戏已重置，请重新布置道具";
+    }
+    
+    // 游戏阶段：掷骰子并移动棋子
+    rollDiceBtn.addEventListener('click', () => {
+      if(phase !== "play") return;
+      // 掷骰子，随机1-3
+      const steps = Math.floor(Math.random() * 3) + 1;
+      diceResultSpan.textContent = steps;
+      messageDiv.textContent = `玩家 ${currentPlayer} 掷出 ${steps}，正向 ${players[currentPlayer].dir} 移动`;
+      moveCurrentPlayer(steps);
+    });
+    
+    // 改变方向按钮事件（用于遇到边界时）：仅在需要改变方向时显示
+    document.querySelectorAll('#changeDirControls button[data-dir]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const newDir = btn.getAttribute('data-dir');
+        players[currentPlayer].dir = newDir;
+        currentDirSpan.textContent = newDir;
+        messageDiv.textContent = `玩家 ${currentPlayer} 改变方向为 ${newDir}`;
+        changeDirControls.classList.add('hidden');
+        // 结束本轮回合后切换玩家（您也可设计继续移动剩余步数的逻辑）
+        currentPlayer = (currentPlayer === "A") ? "B" : "A";
+        currentPlayerSpan.textContent = currentPlayer;
+        drawBoard();
+      });
+    });
+  </script>
+</body>
+</html>
