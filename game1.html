@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>食物单词拼拼乐</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            text-align: center;
+            margin-top: 50px;
+        }
+        #game-area {
+            margin: 20px auto;
+            padding: 20px;
+            border: 2px solid #ccc;
+            width: 300px;
+            border-radius: 10px;
+        }
+        #shuffled-word {
+            font-size: 24px;
+            font-weight: bold;
+            margin: 10px 0;
+            letter-spacing: 5px;
+        }
+        #user-input {
+            padding: 10px;
+            font-size: 16px;
+            width: 80%;
+            margin: 10px 0;
+        }
+        #message {
+            font-size: 18px;
+            color: green;
+            margin: 10px 0;
+        }
+        #score {
+            font-size: 20px;
+            font-weight: bold;
+            margin: 10px 0;
+        }
+        button {
+            padding: 10px 20px;
+            font-size: 16px;
+            cursor: pointer;
+            margin: 5px;
+        }
+    </style>
+</head>
+<body>
+    <h1>食物单词拼拼乐</h1>
+    <div id="game-area">
+        <button onclick="startGame()">开始游戏</button>
+        <div id="shuffled-word"></div>
+        <input type="text" id="user-input" placeholder="输入正确单词" disabled>
+        <button onclick="checkAnswer()" id="submit-btn" disabled>提交</button>
+        <div id="message"></div>
+        <div id="score">得分: 0</div>
+    </div>
+
+    <script>
+        // 预设的食物相关单词库
+        const foodWords = ["apple", "banana", "orange", "grape", "lemon", "peach", "pear", "kiwi", "pizza", "bread", "cheese", "pasta", "sushi", "salad", "tomato"];
+
+        let currentWord = ""; // 当前单词
+        let shuffledWord = ""; // 打乱后的单词
+        let score = 0; // 得分
+        let questionCount = 0; // 已出题数量
+        const totalQuestions = 10; // 总题数
+
+        // 随机选择一个单词
+        function getRandomWord() {
+            return foodWords[Math.floor(Math.random() * foodWords.length)];
+        }
+
+        // 打乱字母顺序
+        function shuffleWord(word) {
+        	let shuffled;
+        	do {
+        		shuffled=word.split('').sort(() => Math.random() - 0.5).join('');
+			} while (shuffled === word); // 如果打乱后的单词与原始单词相同，则重新打乱 
+            return shuffled; 
+        }
+
+        // 初始化游戏
+        function startGame() {
+            score = 0; // 重置得分
+            questionCount = 0; // 重置已出题数量
+            document.getElementById("score").innerText = "得分: 0"; // 重置得分显示
+            document.getElementById("message").innerText = ""; // 清空提示信息
+            document.getElementById("user-input").disabled = false; // 启用输入框
+            document.getElementById("submit-btn").disabled = false; // 启用提交按钮
+            nextQuestion(); // 进入下一题
+        }
+
+        // 进入下一题
+        function nextQuestion() {
+            if (questionCount >= totalQuestions) {
+                endGame(); // 如果已出10题，结束游戏
+                return;
+            }
+            currentWord = getRandomWord(); // 随机选择一个单词
+            shuffledWord = shuffleWord(currentWord); // 打乱字母顺序
+            document.getElementById("shuffled-word").innerText = shuffledWord; // 展示乱序字母
+            document.getElementById("user-input").value = ""; // 清空输入框
+            questionCount++; // 增加已出题数量
+        }
+
+        // 检查答案
+        function checkAnswer() {
+            const userInput = document.getElementById("user-input").value.toLowerCase(); // 获取玩家输入
+            if (userInput === currentWord) {
+                document.getElementById("message").innerText = "恭喜你，答对了！";
+                score=score+10; // 得分加10
+                document.getElementById("score").innerText = `得分: ${score}`; // 更新得分显示
+            } else {
+                document.getElementById("message").innerText = `答案错误！正确单词是：${currentWord}`;
+            }
+            setTimeout(nextQuestion, 1000); // 1秒后进入下一题
+        }
+
+        // 结束游戏
+        function endGame() {
+            document.getElementById("shuffled-word").innerText = "游戏结束！";
+            document.getElementById("message").innerText = `你的最终得分是：${score} 分`;
+            document.getElementById("user-input").disabled = true; // 禁用输入框
+            document.getElementById("submit-btn").disabled = true; // 禁用提交按钮
+        }
+    </script>
+</body>
+</html>
